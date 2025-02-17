@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebRTC Demo</title>
+</head>
+<body>
+    <video id="localVideo" autoplay playsinline></video>
+    <video id="remoteVideo" autoplay playsinline></video>
+    <button id="startButton">Start</button>
+
+    <script>
+        const ws = new WebSocket('ws://' + window.location.host + '/ws');
+        let peerConnection;
+
+        ws.onmessage = async function(event) {
+            const message = JSON.parse(event.data);
+            
+            switch (message.event) {
+                case 'answer':
+                    const answer = new RTCSessionDescription(message.data);
+                    await peerConnection.setRemoteDescription(answer);
+                    break;
+                    
+                case 'candidate':
+                    await peerConnection.addIceCandidate(new RTCIceCandidate(message.data));
+                    break;
+            }
+        };
+
+        document.getElementById('startButton').onclick = async () => {
+            // Get local media
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: true,
+                audio: true
+            });
+            document.getElementById('localVideo').srcObject = stream;
+
+            // Create peer connection
+            peerConnection = new RTCPeerConnection({
+                iceServers: [{
+                    urls: 'stun:stun.l.google.com:19302'
+                }]
+            });
+
+            // Add local tracks to peer connection
+            stream.getTracks().forEach(track => {
+                peerConnection.addTrack(track, stream);
+            });
+
+            // Handle ICE candidates
+            peerConnection.onicecandidate = event => {
+                if (event.candidate) {
+                    ws.send(JSON.stringify({
+                        event: 'candidate',
+                        data: event.candidate
+                    }));
+                }
+            };
+
+            // Handle incoming tracks
+            peerConnection.ontrack = event => {
+                document.getElementById('remoteVideo').srcObject = event.streams[0];
+            };
+
+            // Create and send offer
+            const offer = await peerConnection.createOffer();
+            await peerConnection.setLocalDescription(offer);
+            
+            ws.send(JSON.stringify({
+                event: 'offer',
+                data: offer
+            }));
+        };
+    </script>
+</body>
+</html>
