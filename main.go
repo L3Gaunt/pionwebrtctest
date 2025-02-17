@@ -6,9 +6,11 @@ import (
 	"log"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/pion/webrtc/v3"
+	"github.com/pion/webrtc/v3/pkg/media/ivfwriter"
 )
 
 var upgrader = websocket.Upgrader{
@@ -88,6 +90,41 @@ func main() {
 		// Handle incoming tracks
 		peerConnection.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 			fmt.Printf("Received track of kind: %s\n", track.Kind())
+			
+			// Only handle video tracks
+			if track.Kind() == webrtc.RTPCodecTypeVideo {
+				// Create a unique filename using timestamp
+				fileName := fmt.Sprintf("recording_%v.ivf", time.Now().UnixNano())
+				
+				// Create IVF file
+				ivfFile, err := ivfwriter.New(fileName)
+				if err != nil {
+					log.Printf("Failed to create ivf file: %v", err)
+					return
+				}
+				
+				defer func() {
+					if err := ivfFile.Close(); err != nil {
+						log.Printf("Failed to close ivf file: %v", err)
+					}
+				}()
+
+				// Read RTP packets from track
+				for {
+					// Read RTP packets
+					rtp, _, err := track.ReadRTP()
+					if err != nil {
+						log.Printf("Failed to read RTP packet: %v", err)
+						return
+					}
+
+					// Write RTP packets to file
+					if err := ivfFile.WriteRTP(rtp); err != nil {
+						log.Printf("Failed to write RTP packet: %v", err)
+						return
+					}
+				}
+			}
 		})
 
 		// WebSocket message handling loop
